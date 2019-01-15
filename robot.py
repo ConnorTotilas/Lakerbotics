@@ -91,3 +91,6 @@ class MyRobot(CommandBasedRobot):
 
 if __name__ == "__main__":
     wpilib.run(MyRobot)
+
+
+    #need to find what getRobot is. Also need to add in throttle mixers. And make sure mecanum drive code mixes with command code
