@@ -1,7 +1,7 @@
 from wpilib.command.commandgroup import CommandGroup
-
+from wpilib.drive import MecanumDrive
 from wpilib.command.waitcommand import WaitCommand
-from commands.setspeed import SetSpeed
+from robot import MyRobot
 
 
 class AutonomousProgram(CommandGroup):
@@ -13,6 +13,6 @@ class AutonomousProgram(CommandGroup):
     def __init__(self):
         super().__init__("Autonomous Program")
 
-        self.addSequential(SetSpeed(power=0.7, timeoutInSeconds=2))
+        self.addSequential(RobotDrive.drivePolar(1.0, 0, 0.0))
         self.addSequential(WaitCommand(timeout=1))
-        self.addSequential(SetSpeed(power=-0.7, timeoutInSeconds=2))
+        self.addSequential(RobotDrive.drivePolar(1.0, 0, 0.0))
