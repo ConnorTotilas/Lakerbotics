@@ -1,8 +1,6 @@
 import wpilib
 from wpilib.command.subsystem import Subsystem
 
-from commands.followjoystick import FollowJoystick
-
 
 class SingleMotor(Subsystem):
     """
@@ -14,10 +12,11 @@ class SingleMotor(Subsystem):
 
         super().__init__("SingleMotor")
 
-        self.motor = wpilib.Talon(5)
+        self.motor = wpilib.PWMVictorSPX(5)
 
     def setSpeed(self, speed):
         self.motor.set(speed)
 
-    def initDefaultCommand(self):
-        self.setDefaultCommand(FollowJoystick())
+    """def initDefaultCommand(self):
+        self.setDefaultCommand()
+    """

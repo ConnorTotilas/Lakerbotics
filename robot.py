@@ -30,10 +30,10 @@ class MyRobot(CommandBasedRobot):
         you will need to access later.
         """
         """Robot initialization function"""
-        self.frontLeftMotor = wpilib.Talon(self.frontLeftChannel)
-        self.rearLeftMotor = wpilib.Talon(self.rearLeftChannel)
-        self.frontRightMotor = wpilib.Talon(self.frontRightChannel)
-        self.rearRightMotor = wpilib.Talon(self.rearRightChannel)
+        self.frontLeftMotor = wpilib.VictorSP(self.frontLeftChannel)
+        self.rearLeftMotor = wpilib.VictorSP(self.rearLeftChannel)
+        self.frontRightMotor = wpilib.VictorSP(self.frontRightChannel)
+        self.rearRightMotor = wpilib.VictorSP(self.rearRightChannel)
 
         # invert the left side motors
         self.frontLeftMotor.setInverted(True)
@@ -93,4 +93,4 @@ if __name__ == "__main__":
     wpilib.run(MyRobot)
 
 
-    #need to find what getRobot is. Also need to add in throttle mixers. And make sure mecanum drive code mixes with command code
+    #Also need to add in throttle mixers. And make sure mecanum drive code mixes with command code
