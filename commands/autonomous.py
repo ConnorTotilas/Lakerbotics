@@ -12,6 +12,6 @@ class AutonomousProgram(CommandGroup):
     def __init__(self):
         super().__init__("Autonomous Program")
 
-        self.addSequential(Drive(1.0, 0, 0))
+        self.addSequential(Drive(1.0, 0, 0, timeoutInSeconds=2))
         self.addSequential(WaitCommand(timeout=1))
-        self.addSequential(Drive(-1.0, 0, 0)) 
+        self.addSequential(Drive(-1.0, 0, 0, timeoutInSeconds=2)) 

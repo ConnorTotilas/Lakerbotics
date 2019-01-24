@@ -1,11 +1,13 @@
 from wpilib.command import TimedCommand
 from wpilib.drive import MecanumDrive
-import robot
+
 
 class Drive(TimedCommand):
-
-    def __init__(self, magnitude, angle, zrotation):
-        super().__init__("Drive Forward")
+    '''
+    Drive command that can be used for autonomous.
+    '''
+    def __init__(self, magnitude, angle, zrotation, timeoutInSeconds):
+        super().__init__("Drive", timeoutInSeconds)
 
         self.requires(self.getRobot().drive)
         self.magnitude = magnitude
