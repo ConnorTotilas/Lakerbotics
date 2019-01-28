@@ -46,7 +46,4 @@ class MyRobot(CommandBasedRobot):
 
 
 if __name__ == "__main__":
-    wpilib.run(MyRobot)
-
-
-    #Also need to add in throttle mixers. And make sure mecanum drive code mixes with command code
+    wpilib.run(MyRobot, physics_enabled=True)

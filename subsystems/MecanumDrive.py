@@ -34,7 +34,7 @@ class Mecanum(Subsystem):
         self.drive.setExpiration(0.1)
 
     def speed(self, xaxis, yaxis, zaxis, gyro):
-        self.drive.driveCartesian(xaxis, yaxis, zaxis, gyro)
+        self.drive.driveCartesian(yaxis, xaxis, zaxis, gyro)
     
     def initDefaultCommand(self):
         self.setDefaultCommand(ThrottleMixer())

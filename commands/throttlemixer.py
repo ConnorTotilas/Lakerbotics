@@ -13,7 +13,7 @@ class ThrottleMixer(Command):
 
     def execute(self):
         self.getRobot().drive.speed(
-            self.throttlemixerX(), self.throttlemixerY(), self.throttlemixerZ(), 0
+            self.throttlemixerY()*-1, self.throttlemixerX(), self.throttlemixerZ(), 0
         )
     
     def throttlemixerX(self):
