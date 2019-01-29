@@ -15,7 +15,7 @@ class ThrottleMixer(Command):
         self.getRobot().drive.speed(
             self.throttlemixerY()*-1, self.throttlemixerX(), self.throttlemixerZ(), 0
         )
-    
+
     def throttlemixerX(self):
         XSpeed = self.getRobot().joystick.getX()
         if (XSpeed>1.0) or (XSpeed<-1.0):

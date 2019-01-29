@@ -35,4 +35,4 @@ class PhysicsEngine(object):
         vx, vy, vw = drivetrains.mecanum_drivetrain(
             lr_motor, rr_motor, lf_motor, rf_motor
         )
-        self.physics_controller.vector_drive(vy, vx, vw, tm_diff)
+        self.physics_controller.vector_drive(vx, vy, vw, tm_diff)

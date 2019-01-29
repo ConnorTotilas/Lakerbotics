@@ -6,16 +6,17 @@ class Drive(TimedCommand):
     '''
     Drive command that can be used for autonomous.
     '''
-    def __init__(self, magnitude, angle, zrotation, timeoutInSeconds):
+    def __init__(self, yspeed, xspeed, zrotation, gyroangle, timeoutInSeconds):
         super().__init__("Drive", timeoutInSeconds)
 
         self.requires(self.getRobot().drive)
-        self.magnitude = magnitude
-        self.angle = angle
+        self.yspeed = yspeed
+        self.xspeed = xspeed
         self.zrotation = zrotation
+        self.gyroangle = gyroangle
 
     def initialize(self):
-        self.getRobot().drive.drivePolar(self.magnitude, self.angle, self.zrotation)
+        self.getRobot().drive.speed(self.yspeed, self.xspeed, self.zrotation, self.gyroangle)
 
     def end(self):
-        self.getRobot().drive.drivePolar(0, 0, 0)
+        self.getRobot().drive.speed(0, 0, 0, 0)
