@@ -12,6 +12,12 @@ class AutonomousProgram(CommandGroup):
     def __init__(self):
         super().__init__("Autonomous Program")
 
-        self.addSequential(Drive(1.0, 0, 0))
-        self.addSequential(WaitCommand(timeout=1))
-        self.addSequential(Drive(-1.0, 0, 0)) 
+        self.addSequential(Drive(yspeed=0.5, xspeed=-1.0, zrotation=0, gyroangle=0, timeoutInSeconds=3))
+        self.addSequential(WaitCommand(timeout=0.1))
+        self.addSequential(Drive(yspeed=1.0, xspeed=0, zrotation=0, gyroangle=0, timeoutInSeconds=1)) 
+        self.addSequential(WaitCommand(timeout=0.1))
+        self.addSequential(Drive(yspeed=0.5, xspeed=1.0, zrotation=0, gyroangle=0, timeoutInSeconds=2.5))
+        self.addSequential(WaitCommand(timeout=0.1))
+        self.addSequential(Drive(yspeed=1.0, xspeed=0, zrotation=0, gyroangle=0, timeoutInSeconds=1.2))
+        self.addSequential(WaitCommand(timeout=0.1))
+        self.addSequential(Drive(yspeed=0, xspeed=-1.0, zrotation=0, gyroangle=0, timeoutInSeconds=3))
