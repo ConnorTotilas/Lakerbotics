@@ -1,6 +1,7 @@
 import wpilib
 from wpilib.command import Command
 from commandbased import CommandBasedRobot
+from subsystems import doublemotor
 from subsystems import singlemotor
 from subsystems import MecanumDrive
 import oi
@@ -23,7 +24,8 @@ class MyRobot(CommandBasedRobot):
         """
 
         Command.getRobot = lambda x=0: self
-        self.motor = singlemotor.SingleMotor()
+        self.doublemotor = doublemotor.DoubleMotor()
+        self.singlemotor = singlemotor.SingleMotor()
         self.drive = MecanumDrive.Mecanum()
 
         self.autonomousProgram = AutonomousProgram()
@@ -34,7 +36,6 @@ class MyRobot(CommandBasedRobot):
         """
         self.joystick = oi.getJoystick()
 
-        wpilib.CameraServer.launch('vision.py:main')
 
     def autonomousInit(self):
         """

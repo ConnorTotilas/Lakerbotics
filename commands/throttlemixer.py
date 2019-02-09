@@ -40,4 +40,3 @@ class ThrottleMixer(Command):
             return ZSpeed*1
         else:
             return ZSpeed
-        
