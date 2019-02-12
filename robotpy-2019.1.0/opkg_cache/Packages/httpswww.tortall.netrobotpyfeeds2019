@@ -407,6 +407,21 @@ Depends: python37
 Priority: optional
 
 
+Package: python37-robotpy-ctre
+Version: 2019.2.0
+Section: devel
+Architecture: cortexa9-vfpv3
+Maintainer: RobotPy Developers <robotpy@googlegroups.com>
+MD5Sum: f52ae40a289420c11d3f50cfef73c297
+Size: 372814
+Filename: python37-robotpy-ctre_2019.2.0_cortexa9-vfpv3.ipk
+Description: RobotPy bindings for CTRE third party libraries
+OE: unknown
+Homepage: unknown
+Depends: python37
+Priority: optional
+
+
 Package: python37-robotpy-pathfinder
 Version: 0.2.5
 Section: devel
@@ -460,6 +475,36 @@ Maintainer: RobotPy Developers <robotpy@googlegroups.com>
 MD5Sum: 1c9b8b475409905c58b2c2357a259fd6
 Size: 318526
 Filename: python37-robotpy-rev_2019.0.0a2_cortexa9-vfpv3.ipk
+Description: RobotPy bindings for REV third party libraries
+OE: unknown
+Homepage: unknown
+Depends: python37
+Priority: optional
+
+
+Package: python37-robotpy-rev
+Version: 2019.0.0a3
+Section: devel
+Architecture: cortexa9-vfpv3
+Maintainer: RobotPy Developers <robotpy@googlegroups.com>
+MD5Sum: ba2c6a0b5987122057e6037dea419d1e
+Size: 318526
+Filename: python37-robotpy-rev_2019.0.0a3_cortexa9-vfpv3.ipk
+Description: RobotPy bindings for REV third party libraries
+OE: unknown
+Homepage: unknown
+Depends: python37
+Priority: optional
+
+
+Package: python37-robotpy-rev
+Version: 2019.0.0a4
+Section: devel
+Architecture: cortexa9-vfpv3
+Maintainer: RobotPy Developers <robotpy@googlegroups.com>
+MD5Sum: d2a898e14435d011a3ed0a2bc65de230
+Size: 329872
+Filename: python37-robotpy-rev_2019.0.0a4_cortexa9-vfpv3.ipk
 Description: RobotPy bindings for REV third party libraries
 OE: unknown
 Homepage: unknown
