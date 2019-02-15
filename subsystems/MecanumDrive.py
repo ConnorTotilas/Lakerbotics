@@ -13,10 +13,10 @@ class Mecanum(Subsystem):
 
         # motors and the channels they are connected to
 
-        self.frontLeftMotor = wpilib.VictorSP(1)
-        self.rearLeftMotor = wpilib.VictorSP(2)
-        self.frontRightMotor = wpilib.VictorSP(3)
-        self.rearRightMotor = wpilib.VictorSP(4)
+        self.frontLeftMotor = wpilib.VictorSP(0)
+        self.rearLeftMotor = wpilib.VictorSP(1)
+        self.frontRightMotor = wpilib.VictorSP(2)
+        self.rearRightMotor = wpilib.VictorSP(3)
 
         # invert the left side motors
         self.frontLeftMotor.setInverted(True)
