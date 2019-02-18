@@ -347,6 +347,21 @@ Depends: python37, python37-numpy, python37-opencv3 (>= 3.4)
 Priority: optional
 
 
+Package: python37-robotpy-cscore
+Version: 2019.1.0
+Section: devel
+Architecture: cortexa9-vfpv3
+Maintainer: RobotPy Developers <robotpy@googlegroups.com>
+MD5Sum: 56fea9e0b11fb16b03b6af0ad45432bd
+Size: 802464
+Filename: python37-robotpy-cscore_2019.1.0_cortexa9-vfpv3.ipk
+Description: RobotPy bindings for cscore image processing library
+OE: unknown
+Homepage: unknown
+Depends: python37, python37-numpy, python37-opencv3 (>= 3.4)
+Priority: optional
+
+
 Package: python37-robotpy-ctre
 Version: 2019.0.0
 Section: devel
@@ -505,6 +520,21 @@ Maintainer: RobotPy Developers <robotpy@googlegroups.com>
 MD5Sum: d2a898e14435d011a3ed0a2bc65de230
 Size: 329872
 Filename: python37-robotpy-rev_2019.0.0a4_cortexa9-vfpv3.ipk
+Description: RobotPy bindings for REV third party libraries
+OE: unknown
+Homepage: unknown
+Depends: python37
+Priority: optional
+
+
+Package: python37-robotpy-rev
+Version: 2019.0.0a5
+Section: devel
+Architecture: cortexa9-vfpv3
+Maintainer: RobotPy Developers <robotpy@googlegroups.com>
+MD5Sum: 7569e41ba9c5e8d495fe0b8598ae9f98
+Size: 329878
+Filename: python37-robotpy-rev_2019.0.0a5_cortexa9-vfpv3.ipk
 Description: RobotPy bindings for REV third party libraries
 OE: unknown
 Homepage: unknown

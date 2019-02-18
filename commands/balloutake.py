@@ -11,4 +11,7 @@ class BallOutake(Command):
         self.requires(self.getRobot().doublemotor)
 
     def execute(self):
-        self.getRobot().doublemotor.setdoublemotor(-1)
+        self.getRobot().doublemotor.setdoublemotor(-0.3)
+
+    def end(self):
+        self.getRobot().doublemotor.setdoublemotor(0)

@@ -11,4 +11,7 @@ class LowerArm(Command):
         self.requires(self.getRobot().singlemotor)
 
     def execute(self):
-        self.getRobot().singlemotor.setsinglemotor(-1)
+        self.getRobot().singlemotor.setsinglemotor(-0.3)
+
+    def end(self):
+        self.getRobot().singlemotor.setsinglemotor(0)

@@ -13,13 +13,13 @@ def getJoystick():
 
     joystick = Joystick(0)
 
-    trigger = JoystickButton(joystick, Joystick.ButtonType.kTrigger)
-    top = JoystickButton(joystick, Joystick.ButtonType.kTop)
+    button5 = JoystickButton(joystick, 5)
+    button6 = JoystickButton(joystick, 6)
     button3 = JoystickButton(joystick, 3)
     button4 = JoystickButton(joystick, 4)
 
-    trigger.whileHeld(BallIntake())
-    top.whileHeld(BallOutake)
+    button5.whileHeld(BallIntake())
+    button6.whileHeld(BallOutake())
     button3.whileHeld(LiftArm())
     button4.whileHeld(LowerArm())
 

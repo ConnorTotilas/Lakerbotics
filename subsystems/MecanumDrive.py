@@ -23,6 +23,7 @@ class Mecanum(Subsystem):
 
         # you may need to change or remove this to match your robot
         self.rearLeftMotor.setInverted(False)
+        self.rearRightMotor.setInverted(True) #added this to match motor
 
         self.drive = MecanumDrive(
             self.frontLeftMotor,

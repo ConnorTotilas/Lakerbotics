@@ -11,7 +11,7 @@ class SingleMotor(Subsystem):
 
         super().__init__("SingleMotor")
 
-        self.motor = wpilib.PWMVictorSPX(6)
+        self.motor = wpilib.VictorSP(6)
 
     def setsinglemotor(self, speed):
         self.motor.set(speed)
