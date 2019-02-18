@@ -14,15 +14,15 @@ class Mecanum(Subsystem):
         # motors and the channels they are connected to
 
         self.frontLeftMotor = wpilib.VictorSP(0)
-        self.rearLeftMotor = wpilib.VictorSP(1)
+        self.rearLeftMotor = wpilib.PWMVictorSPX(1)
         self.frontRightMotor = wpilib.VictorSP(2)
-        self.rearRightMotor = wpilib.VictorSP(3)
+        self.rearRightMotor = wpilib.PWMVictorSPX(3)
 
         # invert the left side motors
         self.frontLeftMotor.setInverted(True)
 
         # you may need to change or remove this to match your robot
-        self.rearLeftMotor.setInverted(True)
+        self.rearLeftMotor.setInverted(False)
 
         self.drive = MecanumDrive(
             self.frontLeftMotor,

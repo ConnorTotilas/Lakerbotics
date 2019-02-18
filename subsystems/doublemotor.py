@@ -11,8 +11,8 @@ class DoubleMotor(Subsystem):
 
         super().__init__("DoubleMotor")
 
-        self.motor = wpilib.VictorSP(5)
-        self.motor2 = wpilib.VictorSP(6)
+        self.motor = wpilib.PWMVictorSPX(4)
+        self.motor2 = wpilib.PWMVictorSPX(5)
 
     def setdoublemotor(self, speed):
         self.motor.set(speed)
