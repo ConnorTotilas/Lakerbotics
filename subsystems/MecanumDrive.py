@@ -19,11 +19,11 @@ class Mecanum(Subsystem):
         self.rearRightMotor = wpilib.PWMVictorSPX(3)
 
         # invert the left side motors
-        self.frontLeftMotor.setInverted(True)
+        self.frontLeftMotor.setInverted(False)
 
         # you may need to change or remove this to match your robot
         self.rearLeftMotor.setInverted(False)
-        self.rearRightMotor.setInverted(True) #added this to match motor
+        self.rearRightMotor.setInverted(False) #added this to match motor
 
         self.drive = MecanumDrive(
             self.frontLeftMotor,

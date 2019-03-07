@@ -3,6 +3,7 @@ from wpilib.command import Command
 from commandbased import CommandBasedRobot
 from subsystems import doublemotor
 from subsystems import singlemotor
+from subsystems import singlemotor2
 from subsystems import MecanumDrive
 import oi
 from commands.autonomous import AutonomousProgram
@@ -26,6 +27,7 @@ class MyRobot(CommandBasedRobot):
         Command.getRobot = lambda x=0: self
         self.doublemotor = doublemotor.DoubleMotor()
         self.singlemotor = singlemotor.SingleMotor()
+        self.singlemotor2 = singlemotor2.SingleMotor2()
         self.drive = MecanumDrive.Mecanum()
 
         self.autonomousProgram = AutonomousProgram()

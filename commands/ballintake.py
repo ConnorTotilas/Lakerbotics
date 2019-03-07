@@ -11,7 +11,7 @@ class BallIntake(Command):
         self.requires(self.getRobot().doublemotor)
 
     def execute(self):
-        self.getRobot().doublemotor.setdoublemotor(0.3)
+        self.getRobot().doublemotor.setdoublemotor(0.4)
 
     def end(self):
         self.getRobot().doublemotor.setdoublemotor(0)
