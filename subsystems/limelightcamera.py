@@ -1,6 +1,6 @@
 import wpilib
 from wpilib.command.subsystem import Subsystem
-
+from commnads.findtarget import FindTarget
 
 class LimelightCamera(Subsystem):
     '''
@@ -10,7 +10,5 @@ class LimelightCamera(Subsystem):
     def __init__(self):
         super().__init__("Limelight")
 
-        self.Max_Drive = 0.7
-
     def initDefaultCommand(self):
-        self.setDefaultCommand()
+        self.setDefaultCommand(FindTarget())
