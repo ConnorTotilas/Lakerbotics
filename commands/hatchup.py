@@ -11,7 +11,7 @@ class HatchUp(Command):
         self.requires(self.getRobot().singlemotor2)
 
     def execute(self):
-        self.getRobot().singlemotor2.setsinglemotor2(1)
+        self.getRobot().singlemotor2.setsinglemotor2(0.5)
 
     def end(self):
         self.getRobot().singlemotor2.setsinglemotor2(0)

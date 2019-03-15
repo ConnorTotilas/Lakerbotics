@@ -9,10 +9,28 @@ class FindTarget(Command):
     def __init__(self):
         super().__init__("FindTarget")
 
+        self.requires(self.getRobot().drive)
+
     def execute(self):
-        
         table = NetworkTables.getTable("limelight")
-        tx = table.getNumber('tx',None)
-        ty = table.getNumber('ty',None)
-        ta = table.getNumber('ta',None)
-        ts = table.getNumber('ts',None)
+        ty = table.getNumber('ty', 0)
+        
+
+        drive_K = 0.26
+        drive_MAX = 0.7
+
+        KpDistance = -0.1
+        distance_error = ty
+
+        driving_adjust = KpDistance * distance_error
+
+        drive_cmd = driving_adjust * drive_K
+
+        if drive_cmd > drive_MAX:
+            drive_cmd = drive_MAX
+        
+        self.getRobot().drive.speed(
+            0, drive_cmd*-1, 0, 0
+        )
+
+

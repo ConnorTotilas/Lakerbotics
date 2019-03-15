@@ -6,6 +6,7 @@ from commands.liftarm import LiftArm
 from commands.lowerarm import LowerArm
 from commands.hatchup import HatchUp
 from commands.hatchdown import HatchDown
+from commands.findtarget import FindTarget
 
 def getJoystick():
     """
@@ -21,12 +22,14 @@ def getJoystick():
     button4 = JoystickButton(joystick, 4)
     button1 = JoystickButton(joystick, 1)
     button2 = JoystickButton(joystick, 2)
+    button7 = JoystickButton(joystick, 7)
 
-    button5.whileHeld(BallIntake())
+    button5.whenPressed(BallIntake())
     button6.whileHeld(BallOutake())
     button3.whileHeld(LiftArm())
     button4.whileHeld(LowerArm())
     button1.whileHeld(HatchUp())
     button2.whileHeld(HatchDown())
+    button7.whileHeld(FindTarget())
 
     return joystick

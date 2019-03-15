@@ -18,27 +18,25 @@ class ThrottleMixer(Command):
 
     def throttlemixerX(self):
         XSpeed = self.getRobot().joystick.getX()
-        if (XSpeed>0.4) or (XSpeed<-0.4):
+        if (XSpeed>0.2) or (XSpeed<-0.2):
             return XSpeed*0.8
-        elif (XSpeed<=0.4) and (XSpeed>=-0.4):
-            return XSpeed*1.2
+        elif (XSpeed<=0.2) and (XSpeed>=-0.2):
+            return XSpeed*0
         else:
             return XSpeed
     def throttlemixerY(self):
         YSpeed = self.getRobot().joystick.getY()
-        if (YSpeed>0.4) or (YSpeed<-0.4):
-            return YSpeed*0.8
-        elif (YSpeed<=0.4) and (YSpeed>=-0.4) and (YSpeed>0.1) and (YSpeed<-0.1):
-            return YSpeed*1.2
-        elif (YSpeed<=0.1) and (YSpeed>=-0.1):
+        if (YSpeed>0.2) or (YSpeed<-0.2):
+            return YSpeed*0.9
+        elif (YSpeed<=0.2) and (YSpeed>=-0.2):
             return YSpeed*0
         else:
             return YSpeed
     def throttlemixerZ(self):
         ZSpeed = self.getRobot().joystick.getTwist()
-        if (ZSpeed>0.4) or (ZSpeed<-0.4):
+        if (ZSpeed>0.2) or (ZSpeed<-0.2):
             return ZSpeed*0.7
-        elif (ZSpeed<=0.4) and (ZSpeed>=-0.4):
-            return ZSpeed*0.8
+        elif (ZSpeed<=0.2) and (ZSpeed>=-0.2):
+            return ZSpeed*0
         else:
             return ZSpeed

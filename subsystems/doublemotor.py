@@ -15,7 +15,7 @@ class DoubleMotor(Subsystem):
         self.motor2 = wpilib.PWMVictorSPX(6)
 
     def setdoublemotor(self, speed):
-        self.motor.set(-1*speed)
-        self.motor2.set(speed)
+        self.motor.set(speed)
+        self.motor2.set(-1*speed)
 
     
