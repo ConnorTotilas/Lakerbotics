@@ -34,6 +34,8 @@ class MyRobot(CommandBasedRobot):
         """
         self.joystick = oi.getJoystick()
 
+        wpilib.CameraServer.launch('vision.py:main')
+
     def autonomousInit(self):
         """
         You should call start on your autonomous program here. You can
