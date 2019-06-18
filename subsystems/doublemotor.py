@@ -1,7 +1,7 @@
 import wpilib
 from wpilib.command.subsystem import Subsystem
 
-class SingleMotor(Subsystem):
+class DoubleMotor(Subsystem):
     """
     This example subsystem controls two Victors in PercentVBus mode.
     """
@@ -9,10 +9,13 @@ class SingleMotor(Subsystem):
     def __init__(self):
         """Instantiates the motor object."""
 
-        super().__init__("SingleMotor")
+        super().__init__("DoubleMotor")
 
-        self.motor = wpilib.PWMVictorSPX(4)
+        self.motor = wpilib.PWMVictorSPX(5)
+        self.motor2 = wpilib.PWMVictorSPX(6)
 
-    def setsinglemotor(self, speed):
+    def setdoublemotor(self, speed):
         self.motor.set(speed)
+        self.motor2.set(-1*speed)
+
     

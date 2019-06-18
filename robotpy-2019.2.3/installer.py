@@ -12,13 +12,16 @@
 # path issues. Reconsider this once we get to 4000+ lines of code... :p
 #
 
-__version__ = '2019.0.0'
+__version__ = "2019.2.0"
+_useragent = "robotpy-installer/%s" % __version__
 
 import argparse
 import configparser
+import contextlib
 import getpass
 import hashlib
 import inspect
+import json
 import os
 import socket
 import string
@@ -28,62 +31,143 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+
+import urllib.error
+import urllib.request
 
 from collections import OrderedDict
 from distutils.version import LooseVersion
 from functools import reduce as _reduce
-from urllib.request import urlretrieve
 
 import logging
-logger = logging.getLogger('robotpy.installer')
+
+logger = logging.getLogger("robotpy.installer")
 
 
-is_windows = hasattr(sys, 'getwindowsversion')
+is_windows = hasattr(sys, "getwindowsversion")
 
 _FEEDS = [
-    'https://www.tortall.net/~robotpy/feeds/2019',
-    'http://download.ni.com/ni-linux-rt/feeds/2018/arm/cortexa9-vfpv3',
+    "https://www.tortall.net/~robotpy/feeds/2019",
+    "http://download.ni.com/ni-linux-rt/feeds/2018/arm/cortexa9-vfpv3",
 ]
 
-_ROBORIO_IMAGES = ["2019_v12"]
+_ROBORIO_IMAGES = ["2019_v14"]
+
+_ROBOTPY_PYTHON_VERSION = "python37"
 
 
 def md5sum(fname):
     md5 = hashlib.md5()
-    with open(fname, 'rb') as fp:
+    with open(fname, "rb") as fp:
         buf = fp.read(65536)
         while len(buf) > 0:
             md5.update(buf)
             buf = fp.read(65536)
     return md5.hexdigest()
 
-def _urlretrieve(url, fname):
+
+def _urlretrieve(url, fname, cache):
     # Get it
     print("Downloading", url)
 
-    def _reporthook(count, blocksize, totalsize):
-        percent = min(int(count*blocksize*100/totalsize), 100)
-        sys.stdout.write("\r%02d%%" % percent)
+    # Save bandwidth! Use stored metadata to prevent re-downloading
+    # stuff we already have
+    last_modified = None
+    etag = None
+    cache_fname = None
+
+    if cache:
+        cache_fname = fname + ".jmd"
+        if exists(fname) and exists(cache_fname):
+            try:
+                with open(cache_fname) as fp:
+                    md = json.load(fp)
+                if md5sum(fname) == md["md5"]:
+                    etag = md.get("etag")
+                    last_modified = md.get("last-modified")
+            except Exception:
+                pass
+
+    blocksize = 1024 * 8
+
+    def _reporthook(read, totalsize):
+        if totalsize > 0:
+            percent = min(int(read * 100 / totalsize), 100)
+            sys.stdout.write("\r%02d%%" % percent)
+        else:
+            sys.stdout.write("\r%dbytes" % read)
         sys.stdout.flush()
 
     try:
-        urlretrieve(url, fname, _reporthook)
+        # adapted from urlretrieve source
+        headers = {"User-Agent": _useragent}
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        if etag:
+            headers["If-None-Match"] = etag
+
+        req = urllib.request.Request(url, headers=headers)
+
+        with contextlib.closing(urllib.request.urlopen(req)) as rfp:
+            headers = rfp.info()
+
+            with open(fname, "wb") as fp:
+
+                # Deal with header stuff
+                size = -1
+                read = 0
+                if "content-length" in headers:
+                    size = int(headers["Content-Length"])
+
+                while True:
+                    block = rfp.read(blocksize)
+                    if not block:
+                        break
+                    read += len(block)
+                    fp.write(block)
+                    _reporthook(read, size)
+
+        if size >= 0 and read < size:
+            raise ValueError("Only retrieved %s of %s bytes" % (read, size))
+
+        # If we received info from the server, cache it
+        if cache_fname:
+            md = {}
+            if "etag" in headers:
+                md["etag"] = headers["ETag"]
+            if "last-modified" in headers:
+                md["last-modified"] = headers["Last-Modified"]
+            if md:
+                md["md5"] = md5sum(fname)
+                with open(cache_fname, "w") as fp:
+                    json.dump(md, fp)
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            sys.stdout.write("Not modified")
+        else:
+            raise
     except Exception as e:
-        if 'certificate verify failed' in str(e) and sys.platform == 'darwin':
-            pyver = '.'.join(map(str, sys.version_info[:2]))
-            msg = "SSL certificates are not installed! Run /Applications/Python %s/Install Certificates.command to fix this" % pyver
+        if "certificate verify failed" in str(e) and sys.platform == "darwin":
+            pyver = ".".join(map(str, sys.version_info[:2]))
+            msg = (
+                "SSL certificates are not installed! Run /Applications/Python %s/Install Certificates.command to fix this"
+                % pyver
+            )
             raise Exception(msg) from e
         else:
             raise e
-    sys.stdout.write('\n')
+    sys.stdout.write("\n")
+
 
 class OpkgError(Exception):
     pass
 
-class OpkgRepo(object):
-    '''Simplistic OPkg Manager'''
 
-    sys_packages = ['libc6']
+class OpkgRepo(object):
+    """Simplistic OPkg Manager"""
+
+    sys_packages = ["libc6"]
 
     def __init__(self, opkg_cache, arch):
         self.feeds = []
@@ -91,38 +175,38 @@ class OpkgRepo(object):
         self.arch = arch
         if not exists(self.opkg_cache):
             os.makedirs(self.opkg_cache)
-        self.pkg_dbs = join(self.opkg_cache, 'Packages')
+        self.pkg_dbs = join(self.opkg_cache, "Packages")
         if not exists(self.pkg_dbs):
             os.makedirs(self.pkg_dbs)
 
     def add_feed(self, url):
         # Snippet from https://gist.github.com/seanh/93666
         valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-        safe_url = ''.join(c for c in url if c in valid_chars)
-        safe_url = safe_url.replace(' ','_')
+        safe_url = "".join(c for c in url if c in valid_chars)
+        safe_url = safe_url.replace(" ", "_")
         feed = {
             "url": url,
             "db_fname": join(self.pkg_dbs, safe_url),
             "pkgs": OrderedDict(),
-            "loaded": False
+            "loaded": False,
         }
         if exists(feed["db_fname"]):
             self.load_package_db(feed)
-            feed['loaded'] = True
+            feed["loaded"] = True
 
         self.feeds.append(feed)
 
     def update_packages(self):
         for feed in self.feeds:
-            pkgurl = feed["url"] + '/Packages'
-            _urlretrieve(pkgurl, feed['db_fname'])
+            pkgurl = feed["url"] + "/Packages"
+            _urlretrieve(pkgurl, feed["db_fname"], True)
             self.load_package_db(feed)
 
     def load_package_db(self, feed):
 
         # dictionary of lists of packages sorted by version
         pkg = OrderedDict()
-        with open(feed["db_fname"], 'r', encoding='utf-8') as fp:
+        with open(feed["db_fname"], "r", encoding="utf-8") as fp:
             for line in fp.readlines():
                 line = line.strip()
                 if len(line) == 0:
@@ -130,8 +214,8 @@ class OpkgRepo(object):
                     pkg = OrderedDict()
                 else:
                     if ":" in line:
-                        k, v = [i.strip() for i in line.split(':', 1)]
-                        if k == 'Version':
+                        k, v = [i.strip() for i in line.split(":", 1)]
+                        if k == "Version":
                             v = LooseVersion(v)
                         pkg[k] = v
 
@@ -139,19 +223,19 @@ class OpkgRepo(object):
 
         # Finally, make sure all the packages are sorted by version
         for pkglist in feed["pkgs"].values():
-            pkglist.sort(key=lambda p: p['Version'])
+            pkglist.sort(key=lambda p: p["Version"])
 
     def _add_pkg(self, pkg, feed):
-        if len(pkg) == 0 or pkg.get('Architecture', None) != self.arch:
+        if len(pkg) == 0 or pkg.get("Architecture", None) != self.arch:
             return
         # Add download url and fname
-        if 'Filename' in pkg:
-            pkg['url'] = "/".join((feed["url"], pkg['Filename']))
+        if "Filename" in pkg:
+            pkg["url"] = "/".join((feed["url"], pkg["Filename"]))
 
         # Only retain one version of a package
-        pkgs = feed["pkgs"].setdefault(pkg['Package'], [])
+        pkgs = feed["pkgs"].setdefault(pkg["Package"], [])
         for old_pkg in pkgs:
-            if old_pkg['Version'] == pkg['Version']:
+            if old_pkg["Version"] == pkg["Version"]:
                 old_pkg.clear()
                 old_pkg.update(pkg)
                 break
@@ -161,42 +245,53 @@ class OpkgRepo(object):
     def get_pkginfo(self, name):
         loaded = False
         for feed in self.feeds:
-            loaded = loaded or feed['loaded']
+            loaded = loaded or feed["loaded"]
             if name in feed["pkgs"]:
                 return feed["pkgs"][name][-1]
 
         if loaded:
-            msg = 'Package %s is not in the package list (did you misspell it?)' % name
+            msg = "Package %s is not in the package list (did you misspell it?)" % name
         else:
-            msg = 'There are no package lists, did you download %s yet?' % name
+            msg = "There are no package lists, did you download %s yet?" % name
 
         raise OpkgError(msg)
 
     def _get_pkg_fname(self, pkg):
-        return join(self.opkg_cache, basename(pkg['Filename']))
+        return join(self.opkg_cache, basename(pkg["Filename"]))
 
     def _get_pkg_deps(self, name):
         info = self.get_pkginfo(name)
         if "Depends" in info:
-            return set([dep for dep in [dep.strip().split(" ", 1)[0] for dep in info["Depends"].split(",")] if dep not in self.sys_packages])
+            return set(
+                [
+                    dep
+                    for dep in [
+                        dep.strip().split(" ", 1)[0]
+                        for dep in info["Depends"].split(",")
+                    ]
+                    if dep not in self.sys_packages
+                ]
+            )
         return set()
 
     def get_cached_pkg(self, name):
-        '''Returns the pkg, filename of a cached package'''
+        """Returns the pkg, filename of a cached package"""
         pkg = self.get_pkginfo(name)
         fname = self._get_pkg_fname(pkg)
 
         if not exists(fname):
-            raise OpkgError("Package '%s' has not been downloaded into the cache" % name)
+            raise OpkgError(
+                "Package '%s' has not been downloaded into the cache" % name
+            )
 
-        if not md5sum(fname) == pkg['MD5Sum']:
-            raise OpkgError('Cached package for %s md5sum does not match' % name)
+        if not md5sum(fname) == pkg["MD5Sum"]:
+            raise OpkgError("Cached package for %s md5sum does not match" % name)
 
         return pkg, fname
 
     def resolve_pkg_deps(self, packages):
-        '''Given a list of package(s) desired to be installed, topologically
-           sorts them by dependencies and returns an ordered list of packages'''
+        """Given a list of package(s) desired to be installed, topologically
+           sorts them by dependencies and returns an ordered list of packages"""
 
         pkgs = {}
         packages = packages[:]
@@ -204,7 +299,7 @@ class OpkgRepo(object):
         for pkg in packages:
             if pkg in pkgs:
                 continue
-            deps =  self._get_pkg_deps(pkg)
+            deps = self._get_pkg_deps(pkg)
             pkgs[pkg] = deps
             packages.extend(deps)
 
@@ -231,17 +326,19 @@ class OpkgRepo(object):
         # Find all items that don't depend on anything.
         extra_items_in_deps = _reduce(set.union, data.values()) - set(data.keys())
         # Add empty dependences where needed.
-        data.update({item:set() for item in extra_items_in_deps})
+        data.update({item: set() for item in extra_items_in_deps})
         while True:
             ordered = set(item for item, dep in data.items() if len(dep) == 0)
             if not ordered:
                 break
             yield ordered
-            data = {item: (dep - ordered)
-                    for item, dep in data.items()
-                        if item not in ordered}
+            data = {
+                item: (dep - ordered)
+                for item, dep in data.items()
+                if item not in ordered
+            }
         if len(data) != 0:
-            #raise ValueError('Cyclic dependencies exist among these items: {}'.format(', '.join(repr(x) for x in data.items())))
+            # raise ValueError('Cyclic dependencies exist among these items: {}'.format(', '.join(repr(x) for x in data.items())))
             yield self._modified_dfs(data)
 
     def _modified_dfs(self, nodes):
@@ -272,16 +369,17 @@ class OpkgRepo(object):
         fname = self._get_pkg_fname(pkg)
 
         # Only download it if necessary
-        if not exists(fname) or not md5sum(fname) == pkg['MD5Sum']:
-            _urlretrieve(pkg['url'], fname)
+        if not exists(fname) or not md5sum(fname) == pkg["MD5Sum"]:
+            _urlretrieve(pkg["url"], fname, True)
         # Validate it
-        if md5sum(fname) != pkg['MD5Sum']:
-            raise OpkgError('Downloaded package for %s md5sum does not match' % name)
+        if md5sum(fname) != pkg["MD5Sum"]:
+            raise OpkgError("Downloaded package for %s md5sum does not match" % name)
 
         return fname
 
+
 def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=False):
-    '''
+    """
         Wrapper around openssh that allows you to send a password to
         ssh/sftp/scp et al similar to sshpass. *nix only, tested on linux
         and OSX.
@@ -295,7 +393,7 @@ def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=Fal
         :param capture_output: If True, suppresses output to stdout and stores
                                it in a buffer that is returned
         :returns: (retval, output)
-    '''
+    """
 
     import pty, select
 
@@ -308,8 +406,8 @@ def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=Fal
         # in child
         os.close(stdout_fd)
         os.close(stderr_fd)
-        os.dup2(w1_fd, 1)    # replace stdout on child
-        os.dup2(w2_fd, 2)    # replace stderr on child
+        os.dup2(w1_fd, 1)  # replace stdout on child
+        os.dup2(w2_fd, 2)  # replace stderr on child
         os.close(w1_fd)
         os.close(w2_fd)
 
@@ -329,7 +427,7 @@ def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=Fal
         except IOError:
             data = None
         if not data:
-            rd_fds.remove(fd) # EOF
+            rd_fds.remove(fd)  # EOF
 
         return data
 
@@ -344,11 +442,10 @@ def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=Fal
                 # Deal with prompts from pty
                 data = _read(pty_fd)
                 if data is not None:
-                    if b'assword:' in data:
-                        os.write(pty_fd, bytes(password + '\n', 'utf-8'))
-                    elif b're you sure you want to continue connecting' in data:
-                        os.write(pty_fd, b'yes\n')
-
+                    if b"assword:" in data:
+                        os.write(pty_fd, bytes(password + "\n", "utf-8"))
+                    elif b"re you sure you want to continue connecting" in data:
+                        os.write(pty_fd, b"yes\n")
 
                 # Deal with stdout
                 data = _read(stdout_fd)
@@ -356,142 +453,227 @@ def ssh_exec_pass(password, args, capture_output=False, suppress_known_hosts=Fal
                     if capture_output:
                         output.extend(data)
                     else:
-                        sys.stdout.write(data.decode('utf-8', 'ignore'))
+                        sys.stdout.write(data.decode("utf-8", "ignore"))
 
                 data = _read(stderr_fd)
                 if data is not None:
-                    if not suppress_known_hosts or b'Warning: Permanently added' not in data:
-                        sys.stderr.write(data.decode('utf-8', 'ignore'))
+                    if (
+                        not suppress_known_hosts
+                        or b"Warning: Permanently added" not in data
+                    ):
+                        sys.stderr.write(data.decode("utf-8", "ignore"))
     finally:
         os.close(pty_fd)
 
     pid, retval = os.waitpid(pid, 0)
-    retval = (retval & 0xff00) >> 8
+    retval = (retval & 0xFF00) >> 8
     return retval, output
+
 
 class Error(Exception):
     pass
 
+
 class ArgError(Error):
     pass
+
 
 class SshExecError(Error):
     def __init__(self, msg, retval):
         super().__init__(msg)
         self.retval = retval
 
-# Arguments to pass to SSH to allow a man in the middle attack
-mitm_args = ['-oStrictHostKeyChecking=no', '-oUserKnownHostsFile=/dev/null']
 
-def ssh_from_cfg(cfg_filename, username, password, hostname=None, allow_mitm=False, no_resolve=False):
+# Arguments to pass to SSH to allow a man in the middle attack
+mitm_args = ["-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null"]
+
+
+def _resolve_addr(hostname):
+    try:
+        logger.debug("Looking up hostname '%s'...", hostname)
+        # addrs = [(family, socktype, proto, canonname, sockaddr)]
+        addrs = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        raise Error("Could not find robot at %s" % hostname) from e
+
+    # Sort the address by family.
+    # Lucky for us, the family type is the first element of the tuple, and it's an enumerated type with
+    # AF_INET=2 (IPv4) and AF_INET6=23 (IPv6), so sorting them will provide us with the AF_INET address first.
+    addrs.sort()
+
+    # pick the first address that is sock_stream
+    # AF_INET sockaddr tuple:  (address, port)
+    # AF_INET6 sockaddr tuple: (address, port, flow info, scope id)
+    for _, socktype, _, _, sockaddr in addrs:
+        if socktype == socket.SOCK_STREAM:
+            ip = sockaddr[
+                0
+            ]  # The address if the first tuple element for both AF_INET and AF_INET6
+            logger.debug("-> Found %s at %s" % (hostname, ip))
+            hostname = ip
+            break
+
+    return hostname
+
+
+class RobotFinder:
+    def __init__(self, *addrs):
+        self.tried = 0
+        self.answer = None
+        self.addrs = addrs
+        self.cond = threading.Condition()
+
+    def find(self):
+
+        with self.cond:
+            self.tried = 0
+            for addr, resolve in self.addrs:
+                t = threading.Thread(target=self._try_server, args=(addr, resolve))
+                t.setDaemon(True)
+                t.start()
+
+            while self.answer is None and self.tried != len(self.addrs):
+                self.cond.wait()
+
+            if self.answer:
+                logger.info("-> Robot is at %s", self.answer)
+                return self.answer
+
+    def _try_server(self, addr, resolve):
+        success = False
+        try:
+            if resolve:
+                addr = _resolve_addr(addr)
+            else:
+                sd = socket.create_connection((addr, 22), timeout=10)
+                sd.close()
+
+            success = True
+        except Exception:
+            pass
+
+        with self.cond:
+            self.tried += 1
+            if success and not self.answer:
+                self.answer = addr
+
+            self.cond.notify_all()
+
+
+def ssh_from_cfg(
+    cfg_filename, username, password, hostname=None, allow_mitm=False, no_resolve=False
+):
     # hostname can be a team number or an ip / hostname
 
     dirty = True
     cfg = configparser.ConfigParser()
-    cfg.setdefault('auth', {})
+    cfg.setdefault("auth", {})
 
     if exists(cfg_filename):
         cfg.read(cfg_filename)
         dirty = False
-    
+
     if hostname is not None:
         dirty = True
-        cfg['auth']['hostname'] = str(hostname)
+        cfg["auth"]["hostname"] = str(hostname)
 
-    hostname = cfg['auth'].get('hostname')
+    hostname = cfg["auth"].get("hostname")
 
     if not hostname:
         dirty = True
 
         print("Robot setup (hit enter for default value):")
         while not hostname:
-            hostname = input('Team number or robot hostname: ')
+            hostname = input("Team number or robot hostname: ")
 
-        cfg['auth']['hostname'] = hostname
+        cfg["auth"]["hostname"] = hostname
 
     if dirty:
-        with open(cfg_filename, 'w') as fp:
+        with open(cfg_filename, "w") as fp:
             cfg.write(fp)
 
     # see if an ssh alias exists
     try:
-        with open(join(expanduser('~'), '.ssh', 'config')) as fp:
+        with open(join(expanduser("~"), ".ssh", "config")) as fp:
             hn = hostname.lower()
             for line in fp:
-                if re.match(r'\s*host\s+%s\s*' % hn, line.lower()):
+                if re.match(r"\s*host\s+%s\s*" % hn, line.lower()):
                     no_resolve = True
                     break
     except Exception:
         pass
-    
+
     # check to see if this is a team number
+    team = None
     try:
         team = int(hostname.strip())
     except ValueError:
-        pass
-    else:
-        # TODO: be smarter about this in the future
-        hostname = '10.%d.%d.2' % (int(team) // 100, int(team) % 100)
+        # check to see if it matches a team hostname
+        # -> allows legacy hostname configurations to benefit from
+        #    the robot finder
+        if not no_resolve:
+            hostmod = hostname.lower().strip()
+            m = re.search(r"10.(\d+).(\d+).2", hostmod)
+            if m:
+                team = int(m.group(1)) * 100 + int(m.group(2))
+            else:
+                m = re.match(r"roborio-(\d+)-frc(?:\.(?:local|lan))?$", hostmod)
+                if m:
+                    team = int(m.group(1))
+
+    if team:
+        logger.info("Finding robot for team %s", team)
+        finder = RobotFinder(
+            ("10.%d.%d.2" % (team // 100, team % 100), False),
+            ("roboRIO-%d-FRC.local" % team, True),
+            ("172.22.11.2", False),  # USB
+            ("roboRIO-%d-FRC" % team, True),  # default DNS
+            ("roboRIO-%d-FRC.lan" % team, True),
+            ("roboRIO-%d-FRC.frc-field.local" % team, True),  # practice field mDNS
+        )
+        hostname = finder.find()
+        no_resolve = True
+        if not hostname:
+            raise Error("Could not find team %s robot" % team)
 
     if not no_resolve:
-        try:
-            logger.info("Looking up hostname '%s'...", hostname)
-            # addrs = [(family, socktype, proto, canonname, sockaddr)]
-            addrs = socket.getaddrinfo(hostname, None)
-        except socket.gaierror as e:
-            raise Error("Could not find robot at %s" % hostname) from e
-
-        # Sort the address by family.
-        # Lucky for us, the family type is the first element of the tuple, and it's an enumerated type with
-        # AF_INET=2 (IPv4) and AF_INET6=23 (IPv6), so sorting them will provide us with the AF_INET address first.
-        addrs.sort()
-
-        # pick the first address that is sock_stream
-        # AF_INET sockaddr tuple:  (address, port)
-        # AF_INET6 sockaddr tuple: (address, port, flow info, scope id)
-        for _, socktype, _, _, sockaddr in addrs:
-            if socktype == socket.SOCK_STREAM:
-                ip = sockaddr[0] # The address if the first tuple element for both AF_INET and AF_INET6
-                print("-> Found %s at %s" % (hostname, ip))
-                print()
-                hostname = ip
-                break
+        hostname = _resolve_addr(hostname)
 
     logger.info("Connecting to robot via SSH at %s", hostname)
 
-    return SshController(hostname, username, password,
-                         allow_mitm)
+    return SshController(hostname, username, password, allow_mitm)
 
 
 def ensure_win_bins(ignore_os=False):
-    '''Makes sure the right Windows binaries are present'''
+    """Makes sure the right Windows binaries are present"""
 
     if not ignore_os and not is_windows:
         return
 
-    _win_bins = abspath(join(dirname(__file__), 'win32'))
-    _plink_url = 'https://the.earth.li/~sgtatham/putty/latest/x86/plink.exe'
-    _psftp_url = 'https://the.earth.li/~sgtatham/putty/latest/x86/psftp.exe'
+    _win_bins = abspath(join(dirname(__file__), "win32"))
+    _plink_url = "https://the.earth.li/~sgtatham/putty/latest/x86/plink.exe"
+    _psftp_url = "https://the.earth.li/~sgtatham/putty/latest/x86/psftp.exe"
 
     if not exists(_win_bins):
         os.mkdir(_win_bins)
 
-    psftp = join(_win_bins, 'psftp.exe')
-    plink = join(_win_bins, 'plink.exe')
+    psftp = join(_win_bins, "psftp.exe")
+    plink = join(_win_bins, "plink.exe")
 
     if not exists(psftp):
-        _urlretrieve(_psftp_url, psftp)
+        _urlretrieve(_psftp_url, psftp, True)
 
     if not exists(plink):
-        _urlretrieve(_plink_url, plink)
+        _urlretrieve(_plink_url, plink, True)
 
     return _win_bins
 
+
 class SshController(object):
-    '''
+    """
         Use this to transfer files and execute commands on a roboRIO in a
         cross platform manner
-    '''
+    """
 
     def __init__(self, hostname, username, password, allow_mitm=False):
         self.username = username
@@ -501,7 +683,7 @@ class SshController(object):
 
     @property
     def win_bins(self):
-        if not hasattr(self, '_win_bins'):
+        if not hasattr(self, "_win_bins"):
             self._win_bins = ensure_win_bins()
         return self._win_bins
 
@@ -511,14 +693,14 @@ class SshController(object):
 
     def ssh(self, *args, get_output=False):
 
-        ssh_args = ['%s@%s' % (self.username, self.hostname)] + list(args)
+        ssh_args = ["%s@%s" % (self.username, self.hostname)] + list(args)
 
         # Check for requirements
         if is_windows:
-            cmd = join(self.win_bins, 'plink.exe')
+            cmd = join(self.win_bins, "plink.exe")
 
             # plink has a -pw argument we can use, which is nice
-            ssh_args = [cmd, '-pw', self.password ] + ssh_args
+            ssh_args = [cmd, "-pw", self.password] + ssh_args
 
             try:
                 if get_output:
@@ -529,7 +711,7 @@ class SshController(object):
                 raise SshExecError(e, e.returncode)
 
         else:
-            cmd = shutil.which('ssh')
+            cmd = shutil.which("ssh")
             if cmd is None:
                 raise Error("Cannot find ssh executable!")
 
@@ -538,19 +720,25 @@ class SshController(object):
 
             ssh_args = [cmd] + ssh_args
 
-            retval, output = ssh_exec_pass(self.password, ssh_args, get_output,
-                                           suppress_known_hosts=self._allow_mitm)
+            retval, output = ssh_exec_pass(
+                self.password,
+                ssh_args,
+                get_output,
+                suppress_known_hosts=self._allow_mitm,
+            )
             if retval != 0:
-                raise SshExecError('Command %s returned non-zero error status %s' % (' '.join(ssh_args), retval),
-                                   retval)
-            return output.decode('utf-8')
-
+                raise SshExecError(
+                    "Command %s returned non-zero error status %s"
+                    % (" ".join(ssh_args), retval),
+                    retval,
+                )
+            return output.decode("utf-8")
 
     def sftp(self, src, dst, mkdir=True):
-        '''
+        """
             src can be a single file, list of files, or directory
             dst is always a directory, for simplicity
-        '''
+        """
 
         # Create the batch file
         # - psftp cares about the destination file to be exact
@@ -558,7 +746,7 @@ class SshController(object):
 
         bfp, bfname = tempfile.mkstemp(text=True)
         try:
-            with os.fdopen(bfp, 'w') as fp:
+            with os.fdopen(bfp, "w") as fp:
 
                 if isinstance(src, str):
                     if isdir(src):
@@ -567,7 +755,9 @@ class SshController(object):
                             fp.write('mkdir "%s"\n' % rdst)
 
                         if is_windows:
-                            fp.write('put -r "%s" "%s/%s"\n' % (src, dst, basename(src)))
+                            fp.write(
+                                'put -r "%s" "%s/%s"\n' % (src, dst, basename(src))
+                            )
                         else:
                             # Some versions of OpenSSH work fine. Some don't. Will
                             # have to do this the hard way instead...
@@ -598,15 +788,13 @@ class SshController(object):
                     for f in src:
                         fp.write('put "%s" "%s/%s"\n' % (f, dst, basename(f)))
 
-            sftp_args =['-b', bfname,
-                        '%s@%s' % (self.username, self.hostname)]
-
+            sftp_args = ["-b", bfname, "%s@%s" % (self.username, self.hostname)]
 
             if is_windows:
-                cmd = join(self.win_bins, 'psftp.exe')
+                cmd = join(self.win_bins, "psftp.exe")
 
                 # psftp has a -pw argument we can use, which is nice
-                sftp_args = [ cmd, '-pw', self.password ] + sftp_args
+                sftp_args = [cmd, "-pw", self.password] + sftp_args
 
                 try:
                     subprocess.check_call(sftp_args)
@@ -614,7 +802,7 @@ class SshController(object):
                     raise SshExecError(e, e.returncode)
 
             else:
-                cmd = shutil.which('sftp')
+                cmd = shutil.which("sftp")
                 if cmd is None:
                     raise Error("Cannot find sftp executable!")
 
@@ -622,13 +810,17 @@ class SshController(object):
                     sftp_args = mitm_args + sftp_args
 
                 # Must disable BatchMode, else password interaction doesn't work
-                sftp_args = [cmd, '-oBatchMode=no'] + sftp_args
+                sftp_args = [cmd, "-oBatchMode=no"] + sftp_args
 
-                retval, _ = ssh_exec_pass(self.password, sftp_args,
-                                          suppress_known_hosts=self._allow_mitm)
+                retval, _ = ssh_exec_pass(
+                    self.password, sftp_args, suppress_known_hosts=self._allow_mitm
+                )
                 if retval != 0:
-                    raise SshExecError('Command %s returned non-zero error status %s' % (sftp_args, retval),
-                                       retval)
+                    raise SshExecError(
+                        "Command %s returned non-zero error status %s"
+                        % (sftp_args, retval),
+                        retval,
+                    )
 
         finally:
             try:
@@ -637,13 +829,13 @@ class SshController(object):
                 pass
 
     def poor_sync(self, src, dst):
-        '''
+        """
             :param src: Local file, list of files, or directory to sync
             :param dst: Remote directory to copy file to
 
             .. warning:: if you use a list of files, they cannot have the same
                          filename!
-        '''
+        """
 
         # Poor man's implementation of rsync. Why? Well..
         # -> Windows may not have rsync
@@ -654,13 +846,15 @@ class SshController(object):
 
         if not isinstance(src, str):
             files = {basename(f): f for f in src}
-            md5sum_cmd = 'md5sum %s 2> /dev/null' % ' '.join(['%s/%s' % (dst, f) for f in files.keys()])
+            md5sum_cmd = "md5sum %s 2> /dev/null" % " ".join(
+                ["%s/%s" % (dst, f) for f in files.keys()]
+            )
         elif isdir(src):
             files = {f: join(src, f) for f in os.listdir(src)}
-            md5sum_cmd = 'md5sum %s/* 2> /dev/null' % (dst)
+            md5sum_cmd = "md5sum %s/* 2> /dev/null" % (dst)
         else:
             files = {basename(src), src}
-            md5sum_cmd = 'md5sum %s/%s 2> /dev/null' % (dst, basename(src))
+            md5sum_cmd = "md5sum %s/%s 2> /dev/null" % (dst, basename(src))
 
         local_files = {}
 
@@ -678,9 +872,9 @@ class SshController(object):
         lines = self.ssh(ssh_cmd, get_output=True)
 
         # once you get it, compare them
-        for line in lines.split('\n'):
+        for line in lines.split("\n"):
             if len(line) == 1:
-                mkdir = (line == '1')
+                mkdir = line == "1"
                 continue
             md5 = line[:32]
             fname = basename(line[32:].strip())
@@ -696,32 +890,32 @@ class SshController(object):
 
 
 class RobotpyInstaller(object):
-    '''
+    """
         Logic for installing RobotPy
-    '''
+    """
 
     # opkg feed
-    opkg_arch = 'cortexa9-vfpv3'
+    opkg_arch = "cortexa9-vfpv3"
 
     commands = [
-        'install-robotpy',
-        'download-robotpy',
-        'install',
-        'download',
-        'install-pip',
-        'download-pip',
-        'install-opkg',
-        'download-opkg',
-        'list-opkg',
-        'search-opkg',
+        "install-robotpy",
+        "download-robotpy",
+        "install",
+        "download",
+        "install-pip",
+        "download-pip",
+        "install-opkg",
+        "download-opkg",
+        "list-opkg",
+        "search-opkg",
     ]
 
     def __init__(self, cache_root):
 
-        self.cfg_filename = abspath(join(cache_root, '.installer_config'))
+        self.cfg_filename = abspath(join(cache_root, ".installer_config"))
 
-        self.pip_cache = abspath(join(cache_root, 'pip_cache'))
-        self.opkg_cache = abspath(join(cache_root, 'opkg_cache'))
+        self.pip_cache = abspath(join(cache_root, "pip_cache"))
+        self.opkg_cache = abspath(join(cache_root, "opkg_cache"))
 
         if not exists(self.pip_cache):
             os.makedirs(self.pip_cache)
@@ -729,6 +923,9 @@ class RobotpyInstaller(object):
         self._ctrl = None
         self._hostname = None
         self.remote_commands = []
+
+        # code, message
+        self.error_checks = {}
 
     def _get_opkg(self):
         opkg = OpkgRepo(self.opkg_cache, self.opkg_arch)
@@ -740,14 +937,16 @@ class RobotpyInstaller(object):
 
         cmd = "IV=$(grep IMAGEVERSION /etc/natinst/share/scs_imagemetadata.ini); echo $IV; "
         for image in _ROBORIO_IMAGES:
-            cmd += "[ \"$IV\" == 'IMAGEVERSION = \"FRC_roboRIO_%s\"' ] || " % image
-        cmd += "(echo '-> ERROR: installer requires RoboRIO image %s! Use --ignore-image-version to force install' && /bin/false)" % _ROBORIO_IMAGES[-1]
+            cmd += '[ "$IV" == \'IMAGEVERSION = "FRC_roboRIO_%s"\' ] || ' % image
+        cmd += (
+            "(echo '-> ERROR: installer requires RoboRIO image %s! Use --ignore-image-version to force install' && /bin/false)"
+            % _ROBORIO_IMAGES[-1]
+        )
 
         self.remote_commands.append("(%s)" % cmd)
 
-
     def set_hostname(self, hostname):
-        '''Set the hostname or the team number'''
+        """Set the hostname or the team number"""
         if self._ctrl is not None:
             raise ValueError("internal error: too late")
         self._hostname = hostname
@@ -755,15 +954,26 @@ class RobotpyInstaller(object):
     @property
     def ctrl(self):
         if self._ctrl is None:
-            self._ctrl = ssh_from_cfg(self.cfg_filename,
-                                      username='admin', password='',
-                                      hostname=self._hostname,
-                                      allow_mitm=True)
+            self._ctrl = ssh_from_cfg(
+                self.cfg_filename,
+                username="admin",
+                password="",
+                hostname=self._hostname,
+                allow_mitm=True,
+            )
         return self._ctrl
 
     def execute_remote(self):
         if len(self.remote_commands) > 0:
-            self.ctrl.ssh(" && ".join(self.remote_commands))
+            try:
+                self.ctrl.ssh(" && ".join(self.remote_commands))
+            except SshExecError as e:
+                for code, message in self.error_checks.items():
+                    if e.retval == code:
+                        logger.error(message)
+                        break
+                else:
+                    raise
 
     #
     # Commands
@@ -776,26 +986,26 @@ class RobotpyInstaller(object):
     def _create_rpy_pip_options(self, options):
         # Construct an appropriate line to install
         options.requirement = []
-        options.packages = ['wpilib',
-                            'robotpy-hal-base',
-                            'robotpy-hal-roborio']
+        options.packages = ["wpilib", "robotpy-hal-base", "robotpy-hal-roborio"]
 
         options.force_reinstall = False
         options.ignore_installed = False
         options.no_deps = False
 
         if options.basever is not None:
-            options.packages = ['%s==%s' % (pkg, options.basever) for pkg in options.packages]
+            options.packages = [
+                "%s==%s" % (pkg, options.basever) for pkg in options.packages
+            ]
 
         if not options.no_tools:
-            options.packages.append('robotpy-wpilib-utilities')
+            options.packages.append("robotpy-wpilib-utilities")
 
         return options
 
     def _create_rpy_opkg_options(self, options):
         # Construct an appropriate line to install
         options.requirement = []
-        options.packages = ['python37']
+        options.packages = [_ROBOTPY_PYTHON_VERSION]
         options.upgrade = True
 
         options.force_reinstall = False
@@ -804,21 +1014,32 @@ class RobotpyInstaller(object):
         return options
 
     def install_robotpy_opts(self, parser):
-        parser.add_argument('--basever', default=None,
-                            help='Install a specific version of WPILib et al')
-        parser.add_argument('--no-tools', action='store_true', default=False,
-                            help="Don't install robotpy-wpilib-utilities")
-        parser.add_argument('--pre', action='store_true', default=False,
-                            help="Include pre-release and development versions.")
-        parser.add_argument('--no-index', action='store_true', default=False)
-        parser.add_argument('--ignore-image-version', action='store_true', default=False)
+        parser.add_argument(
+            "--basever", default=None, help="Install a specific version of WPILib et al"
+        )
+        parser.add_argument(
+            "--no-tools",
+            action="store_true",
+            default=False,
+            help="Don't install robotpy-wpilib-utilities",
+        )
+        parser.add_argument(
+            "--pre",
+            action="store_true",
+            default=False,
+            help="Include pre-release and development versions.",
+        )
+        parser.add_argument("--no-index", action="store_true", default=False)
+        parser.add_argument(
+            "--ignore-image-version", action="store_true", default=False
+        )
 
     def install_robotpy(self, options):
-        '''
+        """
             This will copy the appropriate RobotPy components to the robot, and install
             them. If the components are already installed on the robot, then they will
             be reinstalled.
-        '''
+        """
         opkg_options = self._create_rpy_opkg_options(options)
         self.install_opkg(opkg_options)
 
@@ -835,9 +1056,9 @@ class RobotpyInstaller(object):
     download_robotpy_opts = install_robotpy_opts
 
     def download_robotpy(self, options):
-        '''
+        """
             This will update the cached RobotPy packages to the newest versions available.
-        '''
+        """
 
         self.download_opkg(self._create_rpy_opkg_options(options))
 
@@ -848,15 +1069,20 @@ class RobotpyInstaller(object):
     #
 
     def download_opkg_opts(self, parser):
-        parser.add_argument('packages', nargs='*',
-                            help="Packages to download")
-        parser.add_argument('--force-reinstall', action='store_true', default=False,
-                            help='When upgrading, reinstall all packages even if they are already up-to-date.')
-        parser.add_argument('--no-index', action='store_true', default=False)
+        parser.add_argument("packages", nargs="*", help="Packages to download")
+        parser.add_argument(
+            "--force-reinstall",
+            action="store_true",
+            default=False,
+            help="When upgrading, reinstall all packages even if they are already up-to-date.",
+        )
+        parser.add_argument("--no-index", action="store_true", default=False)
 
     def install_opkg_opts(self, parser):
         self.download_opkg_opts(parser)
-        parser.add_argument('--ignore-image-version', action='store_true', default=False)
+        parser.add_argument(
+            "--ignore-image-version", action="store_true", default=False
+        )
 
     def download_opkg(self, options):
         """
@@ -869,7 +1095,10 @@ class RobotpyInstaller(object):
         opkg = self._get_opkg()
         if not options.no_index:
             opkg.update_packages()
-        package_list = opkg.resolve_pkg_deps(options.packages)
+
+        packages = self._resolve_opkg_names(opkg, options.packages)
+
+        package_list = opkg.resolve_pkg_deps(packages)
         for package in package_list:
             opkg.download(package)
 
@@ -883,24 +1112,29 @@ class RobotpyInstaller(object):
         # Write out the install script
         # -> we use a script because opkg doesn't have a good mechanism
         #    to only install a package if it's not already installed
-        opkg_script_fname = join(self.opkg_cache, 'install_opkg.sh')
+        opkg_script_fname = join(self.opkg_cache, "install_opkg.sh")
         opkg_files = []
-        package_list = opkg.resolve_pkg_deps(options.packages)
+        package_list = self._resolve_opkg_names(opkg, options.packages)
+        package_list = opkg.resolve_pkg_deps(package_list)
 
-        opkg_script = inspect.cleandoc('''
+        opkg_script = inspect.cleandoc(
+            """
             set -e
             PACKAGES=()
             DO_INSTALL=0
-        ''')
+        """
+        )
 
-        opkg_script_bit = inspect.cleandoc('''
+        opkg_script_bit = inspect.cleandoc(
+            """
             if ! opkg list-installed | grep -F '%(name)s - %(version)s'; then
                 PACKAGES+=("opkg_cache/%(fname)s")
                 DO_INSTALL=1
             else
                 echo "%(name)s already installed"
             fi
-        ''')
+        """
+        )
 
         for package in package_list:
             try:
@@ -908,32 +1142,60 @@ class RobotpyInstaller(object):
             except OpkgError as e:
                 raise Error(e)
 
-            opkg_script += "\n" + (opkg_script_bit % {
-                'fname': basename(fname),
-                'name': pkg['Package'],
-                'version': pkg['Version'],
-            })
+            opkg_script += "\n" + (
+                opkg_script_bit
+                % {
+                    "fname": basename(fname),
+                    "name": pkg["Package"],
+                    "version": pkg["Version"],
+                }
+            )
 
             opkg_files.append(fname)
 
         # Finish it out
-        opkg_script += "\n" + (inspect.cleandoc('''
+        opkg_script += "\n" + (
+            inspect.cleandoc(
+                """
             if [ "${DO_INSTALL}" == "0" ]; then
                 echo "No packages to install."
             else
                 opkg install %(options)s ${PACKAGES[@]}
             fi
-        ''') % {
-            'options': "--force-reinstall" if options.force_reinstall else ""
-        })
+        """
+            )
+            % {"options": "--force-reinstall" if options.force_reinstall else ""}
+        )
 
-        with open(opkg_script_fname, 'w', newline='\n') as fp:
+        with open(opkg_script_fname, "w", newline="\n") as fp:
             fp.write(opkg_script)
         opkg_files.append(opkg_script_fname)
 
         logger.info("Copying over the opkg cache...")
-        self.ctrl.poor_sync(opkg_files, 'opkg_cache')
-        self.remote_commands.append('bash opkg_cache/install_opkg.sh')
+        self.ctrl.poor_sync(opkg_files, "opkg_cache")
+        self.remote_commands.append("bash opkg_cache/install_opkg.sh")
+
+    def _resolve_opkg_names(self, opkg, packages):
+        resolved = []
+        for pkg in packages:
+            try:
+                opkg.get_pkginfo(pkg)
+                resolved.append(pkg)
+            except OpkgError as e:
+                for prefix in (
+                    _ROBOTPY_PYTHON_VERSION,
+                    _ROBOTPY_PYTHON_VERSION + "-robotpy",
+                ):
+                    try:
+                        opkg.get_pkginfo(prefix + "-" + pkg)
+                        resolved.append(prefix + "-" + pkg)
+                    except OpkgError:
+                        pass
+                    else:
+                        break
+                else:
+                    raise e
+        return resolved
 
     def _get_opkg_packages(self, options):
         opkg = self._get_opkg()
@@ -941,34 +1203,32 @@ class RobotpyInstaller(object):
             opkg.update_packages()
 
         for feed in opkg.feeds:
-            for pkgname, pkgdata in feed['pkgs'].items():
+            for pkgname, pkgdata in feed["pkgs"].items():
                 for pkg in pkgdata:
                     yield pkg
 
-
     def list_opkg_opts(self, parser):
-        parser.add_argument('--no-index', action='store_true', default=False)
+        parser.add_argument("--no-index", action="store_true", default=False)
 
     def list_opkg(self, options):
         data = set()
         for pkg in self._get_opkg_packages(options):
-            data.add('%(Package)s - %(Version)s' % pkg)
+            data.add("%(Package)s - %(Version)s" % pkg)
 
         for v in sorted(data):
             print(v)
 
     def search_opkg_opts(self, parser):
         self.list_opkg_opts(parser)
-        parser.add_argument('search')
+        parser.add_argument("search")
 
     def search_opkg(self, options):
         # TODO: make this more intelligent...
         data = set()
         option = options.search
         for pkg in self._get_opkg_packages(options):
-            if option in pkg['Package'] or \
-               option in pkg.get('Description', ''):
-                data.add('%(Package)s - %(Version)s' % pkg)
+            if option in pkg["Package"] or option in pkg.get("Description", ""):
+                data.add("%(Package)s - %(Version)s" % pkg)
         for v in sorted(data):
             print(v)
 
@@ -977,44 +1237,74 @@ class RobotpyInstaller(object):
     #
 
     def download_pip_opts(self, parser):
-        parser.add_argument('packages', nargs='*',
-                            help="Packages to download/install, may be a local file")
-        parser.add_argument('-r', '--requirement', action='append', default=[],
-                            help='Install from the given requirements file. This option can be used multiple times.')
-        parser.add_argument('--pre', action='store_true', default=False,
-                            help="Include pre-release and development versions.")
+        parser.add_argument(
+            "packages",
+            nargs="*",
+            help="Packages to download/install, may be a local file",
+        )
+        parser.add_argument(
+            "-r",
+            "--requirement",
+            action="append",
+            default=[],
+            help="Install from the given requirements file. This option can be used multiple times.",
+        )
+        parser.add_argument(
+            "--pre",
+            action="store_true",
+            default=False,
+            help="Include pre-release and development versions.",
+        )
 
         # Various pip arguments
-        parser.add_argument('-U', '--upgrade', action='store_true', default=False,
-                            help="Upgrade packages (ignored when downloading, always downloads new packages)")
+        parser.add_argument(
+            "-U",
+            "--upgrade",
+            action="store_true",
+            default=False,
+            help="Upgrade packages (ignored when downloading, always downloads new packages)",
+        )
 
-        parser.add_argument('--force-reinstall', action='store_true', default=False,
-                            help='When upgrading, reinstall all packages even if they are already up-to-date.')
-        parser.add_argument('-I', '--ignore-installed', action='store_true', default=False,
-                            help='Ignore the installed packages (reinstalling instead).')
+        parser.add_argument(
+            "--force-reinstall",
+            action="store_true",
+            default=False,
+            help="When upgrading, reinstall all packages even if they are already up-to-date.",
+        )
+        parser.add_argument(
+            "-I",
+            "--ignore-installed",
+            action="store_true",
+            default=False,
+            help="Ignore the installed packages (reinstalling instead).",
+        )
 
-        parser.add_argument('--no-deps', action='store_true', default=False,
-                            help="Don't install package dependencies.")
+        parser.add_argument(
+            "--no-deps",
+            action="store_true",
+            default=False,
+            help="Don't install package dependencies.",
+        )
 
     def _process_pip_args(self, options, no_upgrade=False):
         pip_args = []
         if options.pre:
-            pip_args.append('--pre')
+            pip_args.append("--pre")
         if options.upgrade and not no_upgrade:
-            pip_args.append('--upgrade')
+            pip_args.append("--upgrade")
         if options.force_reinstall:
-            pip_args.append('--force-reinstall')
+            pip_args.append("--force-reinstall")
         if options.ignore_installed:
-            pip_args.append('--ignore-installed')
+            pip_args.append("--ignore-installed")
         if options.no_deps:
-            pip_args.append('--no-deps')
+            pip_args.append("--no-deps")
 
         return pip_args
 
     def download_pip(self, options):
-        '''
+        """
             Specify python package(s) to download, and store them in the cache
-        '''
+        """
 
         ensure_win_bins()
 
@@ -1022,19 +1312,33 @@ class RobotpyInstaller(object):
             import pip
         except ImportError:
             raise Error("ERROR: pip must be installed to download python packages")
-        
+
         # Old pip args
-        pip_args = ['--no-cache-dir', '--disable-pip-version-check',
-                    'install', '--no-binary', ':all:', '--download', self.pip_cache]
-        
+        pip_args = [
+            "--no-cache-dir",
+            "--disable-pip-version-check",
+            "install",
+            "--no-binary",
+            ":all:",
+            "--download",
+            self.pip_cache,
+        ]
+
         try:
             pip_version = LooseVersion(pip.__version__)
         except:
             pass
         else:
-            if pip_version >= LooseVersion('8.0'):
-                pip_args = ['--no-cache-dir', '--disable-pip-version-check',
-                            'download', '--no-binary', ':all:', '-d', self.pip_cache]
+            if pip_version >= LooseVersion("8.0"):
+                pip_args = [
+                    "--no-cache-dir",
+                    "--disable-pip-version-check",
+                    "download",
+                    "--no-binary",
+                    ":all:",
+                    "-d",
+                    self.pip_cache,
+                ]
 
         if len(options.requirement) == 0 and len(options.packages) == 0:
             raise ArgError("You must give at least one requirement to install")
@@ -1042,22 +1346,22 @@ class RobotpyInstaller(object):
         pip_args.extend(self._process_pip_args(options, no_upgrade=True))
 
         for r in options.requirement:
-            pip_args.extend(['-r', r])
+            pip_args.extend(["-r", r])
 
         pip_args.extend(options.packages)
-        pip_args = [sys.executable, '-m', 'pip'] + pip_args
-        
+        pip_args = [sys.executable, "-m", "pip"] + pip_args
+
         return subprocess.call(pip_args)
 
     # These share the same options
     install_pip_opts = download_pip_opts
 
     def install_pip(self, options):
-        '''
+        """
             Copies python packages over to the roboRIO, and installs them. If the
             package already has been installed, it will not be upgraded. Use -U to
             upgrade a package.
-        '''
+        """
 
         if len(options.requirement) == 0 and len(options.packages) == 0:
             raise ArgError("You must give at least one requirement to install")
@@ -1070,24 +1374,30 @@ class RobotpyInstaller(object):
         if len(options.requirement) != 0:
             raise NotImplementedError()
 
+        self.remote_commands.append("([ -x /usr/local/bin/pip3 ] || exit 87)")
+        self.error_checks[87] = (
+            "pip3 not found, did you install RobotPy?\n\n"
+            + "Use the download-robotpy and install-robotpy commands to install."
+        )
+
         cmd = "/usr/local/bin/pip3 install --no-index --find-links=pip_cache "
         cmd_args = []
 
         # Is the user asking to install a file?
-        if len(options.packages) == 1 and exists(options.packages[0]):
+        if len(options.packages) == 1 and os.path.isfile(options.packages[0]):
             pkg = options.packages[0]
-            self.ctrl.sftp(pkg, 'pip_cache', mkdir=False)
-            cmd_args = ['pip_cache/' + basename(pkg)]
+            self.ctrl.sftp(pkg, "pip_cache", mkdir=False)
+            cmd_args = ["pip_cache/" + basename(pkg)]
         else:
             # copy the pip cache over
             # .. this is inefficient
             logger.info("Copying over the pip cache...")
-            self.ctrl.poor_sync(self.pip_cache, 'pip_cache')
+            self.ctrl.poor_sync(self.pip_cache, "pip_cache")
 
             logger.info("Running installation...")
             cmd_args = options.packages
 
-        cmd += ' '.join(self._process_pip_args(options) + cmd_args)
+        cmd += " ".join(self._process_pip_args(options) + cmd_args)
         self.remote_commands.append(cmd)
 
         logger.info("Done.")
@@ -1098,6 +1408,7 @@ class RobotpyInstaller(object):
     download_opts = download_pip_opts
     download = download_pip
 
+
 def main(args=None):
 
     if args is None:
@@ -1106,9 +1417,7 @@ def main(args=None):
     log_datefmt = "%H:%M:%S"
     log_format = "%(asctime)s:%(msecs)03d %(levelname)-8s: %(name)-20s: %(message)s"
 
-    logging.basicConfig(datefmt=log_datefmt,
-                        format=log_format,
-                        level=logging.DEBUG)
+    logging.basicConfig(datefmt=log_datefmt, format=log_format, level=logging.DEBUG)
 
     # Because this is included with the RobotPy download package, there
     # are two ways to use this:
@@ -1119,7 +1428,7 @@ def main(args=None):
     #
 
     cache_root = abspath(join(dirname(__file__)))
-    if not exists(join(cache_root, 'pip_cache')):
+    if not exists(join(cache_root, "pip_cache")):
         cache_root = os.getcwd()
 
     try:
@@ -1130,20 +1439,25 @@ def main(args=None):
 
     # argparse boilerplate...
     parser = argparse.ArgumentParser()
-    subparser = parser.add_subparsers(dest='command', help="Commands")
+    subparser = parser.add_subparsers(dest="command", help="Commands")
     subparser.required = True
 
     # shared options
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument('--robot', default=None, help='Specify the robot hostname (overrides --team)')
-    shared.add_argument('--team', default=None, type=int, help='Specify team number to deploy for')
+    shared.add_argument(
+        "--robot", default=None, help="Specify the robot hostname (overrides --team)"
+    )
+    shared.add_argument(
+        "--team", default=None, type=int, help="Specify team number to deploy for"
+    )
 
     # Setup various options
     for command in installer.commands:
-        fn = getattr(installer, command.replace('-', '_'))
-        opt_fn = getattr(installer, command.replace('-', '_') + '_opts')
-        cmdparser = subparser.add_parser(command, help=inspect.getdoc(fn),
-                                         parents=[shared])
+        fn = getattr(installer, command.replace("-", "_"))
+        opt_fn = getattr(installer, command.replace("-", "_") + "_opts")
+        cmdparser = subparser.add_parser(
+            command, help=inspect.getdoc(fn), parents=[shared]
+        )
         opt_fn(cmdparser)
         cmdparser.set_defaults(cmdobj=fn)
 
@@ -1175,6 +1489,7 @@ def main(args=None):
 
     return retval
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     retval = main()
     exit(retval)
